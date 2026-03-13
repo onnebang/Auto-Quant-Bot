@@ -1,28 +1,21 @@
 name: Quant Bot Scheduler
 
 on:
-  workflow_dispatch: # 버튼을 눌러 수동으로 즉시 실행 가능
+  workflow_dispatch:
   schedule:
-    # --- [DCA 장기투자 (하루 1번)] ---
-    # 한국/일본장 마감 전 (KST 15:15) -> UTC 06:15
     - cron: '15 6 * * 1-5' 
-    # 미국장 마감 전 (KST 04:45) -> UTC 19:45
     - cron: '45 19 * * 1-5'
-
-    # --- [단타/스윙 (장중 1시간 간격)] ---
-    # 한국/일본 단타 (KST 10:00~15:00) -> UTC 01:00~06:00
     - cron: '0 1-6 * * 1-5'
-    # 미국 단타 (KST 23:00~04:00) -> UTC 14:00~19:00
     - cron: '0 14-19 * * 1-5'
 
 jobs:
   run-bot:
-    runs-on: ubuntu-latest # 최신 리눅스 환경에서 실행
+    runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3 # 저장소의 코드를 가상 컴퓨터로 가져옴
+    - uses: actions/checkout@v4 # 버전 업그레이드
     
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5 # 버전 업그레이드
       with:
         python-version: '3.10'
         
@@ -31,44 +24,33 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         
-    - name: Execute Strategy based on Time
+    - name: Execute Strategy
       env:
-        # Settings > Secrets에 저장한 변수들을 불러옴
         WEBHOOK_KR_DCA: ${{ secrets.WEBHOOK_KR_DCA }}
         WEBHOOK_KR_DANTA: ${{ secrets.WEBHOOK_KR_DANTA }}
         WEBHOOK_US_DCA: ${{ secrets.WEBHOOK_US_DCA }}
         WEBHOOK_US_DANTA: ${{ secrets.WEBHOOK_US_DANTA }}
         WEBHOOK_JP_DCA: ${{ secrets.WEBHOOK_JP_DCA }}
         WEBHOOK_JP_DANTA: ${{ secrets.WEBHOOK_JP_DANTA }}
-        
       run: |
-        # 현재 서버 시간(UTC)을 가져옴
         HOUR=$(date -u +"%H")
         MINUTE=$(date -u +"%M")
         
-        echo "현재 서버 시간: $HOUR:$MINUTE"
-
-        # 1. 아시아장 DCA 실행 (06:15 UTC)
+        # 1. 아시아 DCA (06:15)
         if [ "$HOUR" == "06" ] && [ "$MINUTE" == "15" ]; then
           python main.py --market kr --mode dca
           python main.py --market jp --mode dca
-        
-        # 2. 미국장 DCA 실행 (19:45 UTC)
+        # 2. 미국 DCA (19:45)
         elif [ "$HOUR" == "19" ] && [ "$MINUTE" == "45" ]; then
           python main.py --market us --mode dca
-        
-        # 3. 아시아장 단타 실행 (01:00 ~ 06:00 정각)
-        elif [ "$HOUR" -ge 01 ] && [ "$HOUR" -le 06 ] && [ "$MINUTE" == "00" ]; then
+        # 3. 아시아 단타 (01:00~06:00)
+        elif [ "$HOUR" -ge 01 ] && [ "$HOUR" -le 06 ]; then
           python main.py --market kr --mode danta
           python main.py --market jp --mode danta
-        
-        # 4. 미국장 단타 실행 (14:00 ~ 19:00 정각)
-        elif [ "$HOUR" -ge 14 ] && [ "$HOUR" -le 19 ] && [ "$MINUTE" == "00" ]; then
+        # 4. 미국 단타 (14:00~19:00)
+        elif [ "$HOUR" -ge 14 ] && [ "$HOUR" -le 19 ]; then
           python main.py --market us --mode danta
-        
-        # 5. 수동 실행(workflow_dispatch) 시에는 모든 시장 한 번씩 스캔
+        # 5. 그 외 시간 수동 실행 시 기본 동작
         else
-          echo "정규 시간이 아니므로 수동 실행 모드로 전환합니다."
           python main.py --market kr --mode danta
-          python main.py --market us --mode danta
         fi
