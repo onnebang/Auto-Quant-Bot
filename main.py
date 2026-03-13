@@ -115,19 +115,19 @@ def run_bot(market, mode):
                     bb_lower = round(df['BB_Lower'].iloc[-1], 2)
                     current_price = df['Close'].iloc[-1]
                     if rsi < 30 and current_price <= bb_lower:
-                    # ... (지표 계산 후 타점 발생 시)
-                    deep_report, change_pct = get_deep_analysis(ticker, df)
-                    # 데이터를 쪼개서 필드로 구성
-                    fields = [
-                        {"name": "📈 현재가", "value": f"**{current_price}** ({change_pct}%)", "inline": True},
-                        {"name": "🌡️ RSI", "value": f"`{rsi}`", "inline": True},
-                        {"name": "📊 가치(PER/PBR)", "value": f"{per} / {pbr}", "inline": True},
-                        {"name": "💰 수익(ROE)", "value": f"{roe}", "inline": True},
-                        {"name": "🛡️ 부채율", "value": f"{debt}%", "inline": True},
-                        {"name": "🎁 배당율", "value": f"{div}", "inline": True}
-                    ]
-                    
-                    send_discord_msg(dca_webhook, f"🚨 {ticker} DCA 매수 타점 포착", "극단적 과매도 구간에 진입하였습니다.", 16711680, fields)
+                        # ... (지표 계산 후 타점 발생 시)
+                        deep_report, change_pct = get_deep_analysis(ticker, df)
+                        # 데이터를 쪼개서 필드로 구성
+                        fields = [
+                            {"name": "📈 현재가", "value": f"**{current_price}** ({change_pct}%)", "inline": True},
+                            {"name": "🌡️ RSI", "value": f"`{rsi}`", "inline": True},
+                            {"name": "📊 가치(PER/PBR)", "value": f"{per} / {pbr}", "inline": True},
+                            {"name": "💰 수익(ROE)", "value": f"{roe}", "inline": True},
+                            {"name": "🛡️ 부채율", "value": f"{debt}%", "inline": True},
+                            {"name": "🎁 배당율", "value": f"{div}", "inline": True}
+                        ]
+                        
+                        send_discord_msg(dca_webhook, f"🚨 {ticker} DCA 매수 타점 포착", "극단적 과매도 구간에 진입하였습니다.", 16711680, fields)
             elif mode == "danta":
                 hist = stock.history(period="15d", interval="1h")
                 if len(hist) >= 26:
