@@ -19,13 +19,20 @@ WEBHOOK_URLS = {
     "JP_DANTA": os.getenv("WEBHOOK_JP_DANTA")
 }
 
-def send_discord_msg(webhook_url, title, description, color):
-    if not webhook_url or not webhook_url.startswith("http"):
-        print(f"⚠️ URL이 설정되지 않았거나 잘못되었습니다: {webhook_url}")
-        return
-    data = {"embeds": [{"title": title, "description": description, "color": color}]}
+def send_discord_msg(webhook_url, title, description, color, fields=[]):
+    if not webhook_url or not webhook_url.startswith("http"): return
+    
+    data = {
+        "embeds": [{
+            "title": title,
+            "description": description,
+            "color": color,
+            "fields": fields, # 표 형태의 데이터를 담는 섹션
+            "footer": {"text": f"분석 시간: {datetime.now().strftime('%Y-%m-%d %H:%M')}"},
+            "thumbnail": {"url": "https://cdn-icons-png.flaticon.com/512/2422/2422796.png"} # 주식 아이콘 추가
+        }]
+    }
     requests.post(webhook_url, json=data)
-
 # ==========================================
 # 2. 시장별 유니버스 구성 (한국, 미국, 일본)
 # ==========================================
@@ -108,9 +115,19 @@ def run_bot(market, mode):
                     bb_lower = round(df['BB_Lower'].iloc[-1], 2)
                     current_price = df['Close'].iloc[-1]
                     if rsi < 30 and current_price <= bb_lower:
-                        deep_report, _ = get_deep_analysis(ticker, df)
-                        msg = f"🩸 **과매도 바닥 구간 진입 (RSI: {rsi})**\n{deep_report}"
-                        send_discord_msg(dca_webhook, f"🚨 {ticker} DCA 타점", msg, 16711680)
+                    # ... (지표 계산 후 타점 발생 시)
+                    deep_report, change_pct = get_deep_analysis(ticker, df)
+                    # 데이터를 쪼개서 필드로 구성
+                    fields = [
+                        {"name": "📈 현재가", "value": f"**{current_price}** ({change_pct}%)", "inline": True},
+                        {"name": "🌡️ RSI", "value": f"`{rsi}`", "inline": True},
+                        {"name": "📊 가치(PER/PBR)", "value": f"{per} / {pbr}", "inline": True},
+                        {"name": "💰 수익(ROE)", "value": f"{roe}", "inline": True},
+                        {"name": "🛡️ 부채율", "value": f"{debt}%", "inline": True},
+                        {"name": "🎁 배당율", "value": f"{div}", "inline": True}
+                    ]
+                    
+                    send_discord_msg(dca_webhook, f"🚨 {ticker} DCA 매수 타점 포착", "극단적 과매도 구간에 진입하였습니다.", 16711680, fields)
             elif mode == "danta":
                 hist = stock.history(period="15d", interval="1h")
                 if len(hist) >= 26:
