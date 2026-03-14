@@ -7,15 +7,18 @@ import json
 import gspread
 from google.oauth2.service_account import Credentials
 import time
-import argparse # 💡 에러의 원인이었던 녀석 추가!
+import argparse
 
 # 한국 시간(KST) 구하는 함수
 def get_kst_time():
     return datetime.utcnow() + timedelta(hours=9)
 
+# 웹훅 URL (DCA 채널도 추가)
 WEBHOOK_URLS = {
     "KR_DANTA_REPORT": os.getenv("WEBHOOK_KR_DANTA"),
-    "US_DANTA_REPORT": os.getenv("WEBHOOK_US_DANTA") 
+    "US_DANTA_REPORT": os.getenv("WEBHOOK_US_DANTA"),
+    "KR_DCA_REPORT": os.getenv("WEBHOOK_KR_DCA"),
+    "US_DCA_REPORT": os.getenv("WEBHOOK_US_DCA")
 }
 
 def send_discord_report(webhook_url, title, description, color, fields=[]):
@@ -45,24 +48,24 @@ def init_gsheets():
         print(f"❌ 구글 시트 연동 실패: {e}")
         return None
 
+# ==========================================
+# [기능 1] 당일 단타 결산
+# ==========================================
 def generate_daily_report(market):
     print(f"\n⚙️ [{market.upper()}] 시장 당일 단타 성적표 작성 중...")
-    webhook_key = f"{market.upper()}_DANTA_REPORT"
-    webhook_url = WEBHOOK_URLS[webhook_key]
+    webhook_url = WEBHOOK_URLS[f"{market.upper()}_DANTA_REPORT"]
     sheet = init_gsheets()
     if not sheet: return
 
     try:
-        data = sheet.get_all_records()
-        df = pd.DataFrame(data)
+        df = pd.DataFrame(sheet.get_all_records())
         if df.empty: return
 
-        # 💡 오늘 날짜도 무조건 한국 시간 기준으로 판단!
         today_str = get_kst_time().strftime('%Y-%m-%d')
-        print(f"   오늘 날짜(KST): {today_str}")
-
         df['날짜'] = pd.to_datetime(df['날짜'])
-        today_trades = df[ (df['날짜'].dt.strftime('%Y-%m-%d') == today_str) & (df['전략(DCA/단타)'] == '단타') ]
+        
+        strategy_col = '전략(DCA/단타)' if '전략(DCA/단타)' in df.columns else '전략 (DCA/단타)'
+        today_trades = df[ (df['날짜'].dt.strftime('%Y-%m-%d') == today_str) & (df[strategy_col] == '단타') ]
         
         if today_trades.empty:
             msg_title = f"☕ [오늘의 {market.upper()} 단타 성적표] - 진입 없음"
@@ -70,19 +73,14 @@ def generate_daily_report(market):
             send_discord_report(webhook_url, msg_title, msg_desc, 255)
             return
 
-        trades_summary = []
-        total_pnl = 0
-        total_investment = 0
+        trades_summary, total_pnl, total_investment = [], 0, 0
         
         for _, row in today_trades.iterrows():
-            ticker = row['티커']
-            stock_name = row['종목명']
-            entry_price = float(row['매수가'])
-            investment = float(row['매수금액(원)']) if '매수금액(원)' in row else 500000
+            ticker, stock_name, entry_price = row['티커'], row['종목명'], float(row['매수가'])
+            investment = float(row.get('매수금액(원)', row.get('매수금액 (원)', 500000)))
             total_investment += investment
             
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period="1d", interval="5m")
+            hist = yf.Ticker(ticker).history(period="1d", interval="5m")
             if hist.empty: continue
                 
             day_high = round(hist['High'].max(), 2)
@@ -93,40 +91,111 @@ def generate_daily_report(market):
             pnl = round(investment * (current_return / 100), 0)
             total_pnl += pnl
             
-            trade_field = {
+            trades_summary.append({
                 "name": f"🏆 {stock_name} ({ticker})",
-                "value": (f"**진입:** {entry_price:,.0f}원 / **현재:** {day_close:,.0f}원\n"
-                          f"**당일 최고 수익률:** `{high_return}`%\n"
-                          f"**현재 수익률:** **`{current_return}`**% (PNL: `{pnl:,.0f}`원)"),
+                "value": f"**진입:** {entry_price:,.0f}원 / **현재:** {day_close:,.0f}원\n**당일 최고 수익률:** `{high_return}`%\n**현재 수익률:** **`{current_return}`**% (PNL: `{pnl:,.0f}`원)",
                 "inline": False
-            }
-            trades_summary.append(trade_field)
+            })
             time.sleep(0.5)
             
         initial_balance = 10000000
         total_return = round(((total_pnl / initial_balance) * 100), 2)
-        final_balance = initial_balance + total_pnl
         
-        msg_title = f"🏆 [오늘의 {market.upper()} 단타 성적표] - 펀드매니저 브리핑"
-        msg_desc = (f"여러분! 오늘 단타봇이 1천만 원 시드로 굴린 성적표가 나왔습니다.\n"
-                    f"총 {len(today_trades)}종목에 투자했습니다. (총 투자금: {total_investment:,.0f}원)")
-        
-        summary_fields = [
+        msg_title = f"🏆 [오늘의 {market.upper()} 단타 성적표]"
+        msg_desc = f"오늘 단타봇이 총 {len(today_trades)}종목에 투자했습니다. (총 투자금: {total_investment:,.0f}원)"
+        summary_fields = trades_summary + [
             {"name": "💵 오늘의 총수익금", "value": f"**`{total_pnl:,.0f}`**원 ({total_return}%)", "inline": True},
-            {"name": "💼 현재 가상 잔고", "value": f"{final_balance:,.0f}원", "inline": True}
+            {"name": "💼 현재 가상 잔고", "value": f"{initial_balance + total_pnl:,.0f}원", "inline": True}
         ]
         
-        final_fields = trades_summary + summary_fields
-        color = 16711680 if total_pnl > 0 else 255
-        
-        send_discord_report(webhook_url, msg_title, msg_desc, color, final_fields)
-        print(f"✨ [{market.upper()}] 결산 리포트 전송 완료!")
-        
+        send_discord_report(webhook_url, msg_title, msg_desc, 16711680 if total_pnl > 0 else 255, summary_fields)
+        print(f"✨ [{market.upper()}] 단타 결산 완료!")
     except Exception as e:
-        print(f"❌ [{market.upper()}] 결산 실패: {e}")
+        print(f"❌ 단타 결산 실패: {e}")
 
+# ==========================================
+# [기능 2] 주간 DCA 펀드 운용 리포트
+# ==========================================
+def generate_weekly_dca_report(market):
+    print(f"\n⚙️ [{market.upper()}] 시장 주간 DCA 포트폴리오 결산 중...")
+    webhook_url = WEBHOOK_URLS[f"{market.upper()}_DCA_REPORT"]
+    sheet = init_gsheets()
+    if not sheet: return
+
+    try:
+        df = pd.DataFrame(sheet.get_all_records())
+        if df.empty: return
+
+        strategy_col = '전략(DCA/단타)' if '전략(DCA/단타)' in df.columns else '전략 (DCA/단타)'
+        dca_trades = df[df[strategy_col] == 'DCA'].copy()
+        
+        if market == 'kr':
+            dca_trades = dca_trades[dca_trades['티커'].str.contains('.KS|.KQ', na=False)]
+        elif market == 'us':
+            dca_trades = dca_trades[~dca_trades['티커'].str.contains('.KS|.KQ|.T', na=False)]
+            
+        if dca_trades.empty:
+            print(f"   {market.upper()} 시장 DCA 누적 기록이 없습니다.")
+            return
+
+        total_investment = 0
+        total_current_value = 0
+        performance_dict = {} 
+
+        for _, row in dca_trades.iterrows():
+            ticker, stock_name, entry_price = row['티커'], row['종목명'], float(row['매수가'])
+            investment = float(row.get('매수금액(원)', row.get('매수금액 (원)', 500000)))
+            
+            shares = investment / entry_price
+            
+            hist = yf.Ticker(ticker).history(period="1d")
+            if hist.empty: continue
+            
+            current_price = float(hist['Close'].iloc[-1])
+            current_value = shares * current_price
+            
+            total_investment += investment
+            total_current_value += current_value
+            
+            return_pct = ((current_price - entry_price) / entry_price) * 100
+            performance_dict[stock_name] = return_pct
+            time.sleep(0.5)
+
+        total_pnl = total_current_value - total_investment
+        total_return_pct = (total_pnl / total_investment) * 100 if total_investment > 0 else 0
+        
+        best_stock = max(performance_dict, key=performance_dict.get)
+        worst_stock = min(performance_dict, key=performance_dict.get)
+        
+        msg_title = f"💼 [{market.upper()}] 퀀트 봇 가상 펀드 주간 리포트"
+        msg_desc = (f"여러분! 한 주 동안 봇이 바닥에서 줍줍한 DCA 가상 펀드 운용 결과입니다.\n"
+                    f"꾸준히 모아가는 장기 투자의 힘을 확인해보세요! 🚀")
+        
+        fields = [
+            {"name": "💰 총 투자 원금", "value": f"{total_investment:,.0f}원", "inline": True},
+            {"name": "📈 현재 평가금액", "value": f"**{total_current_value:,.0f}원**", "inline": True},
+            {"name": "📊 펀드 총수익률", "value": f"**`{total_return_pct:,.2f}%`** (PNL: {total_pnl:,.0f}원)", "inline": False},
+            {"name": f"🥇 최고 효자 종목", "value": f"**{best_stock}** (`{performance_dict[best_stock]:.2f}%`)", "inline": True},
+            {"name": f"🩹 아픈 손가락", "value": f"**{worst_stock}** (`{performance_dict[worst_stock]:.2f}%`)", "inline": True}
+        ]
+        
+        color = 16711680 if total_pnl > 0 else 255
+        send_discord_report(webhook_url, msg_title, msg_desc, color, fields)
+        print(f"✨ [{market.upper()}] DCA 주간 리포트 전송 완료!")
+
+    except Exception as e:
+        print(f"❌ DCA 결산 실패: {e}")
+
+# ==========================================
+# 실행부 (💡 에러가 났던 원인인 --mode 가 이 부분에 제대로 들어가 있습니다!)
+# ==========================================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--market', type=str, required=True, choices=['kr', 'us', 'jp'])
+    parser.add_argument('--mode', type=str, required=True, choices=['danta', 'dca'])
     args = parser.parse_args()
-    generate_daily_report(args.market)
+    
+    if args.mode == 'danta':
+        generate_daily_report(args.market)
+    elif args.mode == 'dca':
+        generate_weekly_dca_report(args.market)
