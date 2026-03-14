@@ -1,0 +1,53 @@
+name: Quant Bot Reporter
+
+on:
+  workflow_dispatch: # 수동 실행 버튼
+  schedule:
+    # --- [당일 단타 결산 리포트] ---
+    # 한국장 마감 직후 (KST 15:40) -> UTC 06:40
+    - cron: '40 6 * * 1-5' 
+    # 미국장 마감 직후 (KST 05:10) -> UTC 20:10
+    - cron: '10 20 * * 1-5'
+
+jobs:
+  run-report:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Execute Reporter based on Time
+      env:
+        # GCP JSON 열쇠와 디스코드 단타 방 웹훅 주소를 불러옴
+        GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+        WEBHOOK_KR_DANTA: ${{ secrets.WEBHOOK_KR_DANTA }}
+        WEBHOOK_US_DANTA: ${{ secrets.WEBHOOK_US_DANTA }}
+        
+      run: |
+        HOUR=$(date -u +"%H")
+        MINUTE=$(date -u +"%M")
+        
+        echo "현재 서버 시간: $HOUR:$MINUTE"
+
+        # 1. 한국장 결산 (06:40 UTC)
+        if [ "$HOUR" == "06" ] && [ "$MINUTE" == "40" ]; then
+          python report.py --market kr
+        
+        # 2. 미국장 결산 (20:10 UTC)
+        elif [ "$HOUR" == "20" ] && [ "$MINUTE" == "10" ]; then
+          python report.py --market us
+        
+        # 3. 수동 실행 시에는 한국장 결산 한 번 돌림
+        else
+          echo "정규 시간이 아니므로 한국장 수동 결산 모드로 전환합니다."
+          python report.py --market kr
+        fi
