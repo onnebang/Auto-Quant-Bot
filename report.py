@@ -13,7 +13,7 @@ import argparse
 def get_kst_time():
     return datetime.utcnow() + timedelta(hours=9)
 
-# 웹훅 URL (DCA 채널도 추가)
+# 웹훅 URL
 WEBHOOK_URLS = {
     "KR_DANTA_REPORT": os.getenv("WEBHOOK_KR_DANTA"),
     "US_DANTA_REPORT": os.getenv("WEBHOOK_US_DANTA"),
@@ -63,9 +63,14 @@ def generate_daily_report(market):
 
         today_str = get_kst_time().strftime('%Y-%m-%d')
         df['날짜'] = pd.to_datetime(df['날짜'])
-        
         strategy_col = '전략(DCA/단타)' if '전략(DCA/단타)' in df.columns else '전략 (DCA/단타)'
-        today_trades = df[ (df['날짜'].dt.strftime('%Y-%m-%d') == today_str) & (df[strategy_col] == '단타') ]
+        
+        # 💡 [핵심 수정] 시트의 '시장' 컬럼과 파이썬의 market 변수를 매칭하여 완벽 필터링!
+        market_korean = "국내" if market == "kr" else "미국" if market == "us" else "일본"
+        
+        today_trades = df[ (df['날짜'].dt.strftime('%Y-%m-%d') == today_str) & 
+                           (df[strategy_col] == '단타') & 
+                           (df['시장'] == market_korean) ]
         
         if today_trades.empty:
             msg_title = f"☕ [오늘의 {market.upper()} 단타 성적표] - 진입 없음"
@@ -91,9 +96,12 @@ def generate_daily_report(market):
             pnl = round(investment * (current_return / 100), 0)
             total_pnl += pnl
             
+            # 💡 [핵심 수정] 미국 주식은 달러($)로, 한국 주식은 원으로 표기! (수익금은 원화 유지)
+            price_format = f"${entry_price:,.2f} / **${day_close:,.2f}**" if market == "us" else f"{entry_price:,.0f}원 / **{day_close:,.0f}원**"
+            
             trades_summary.append({
                 "name": f"🏆 {stock_name} ({ticker})",
-                "value": f"**진입:** {entry_price:,.0f}원 / **현재:** {day_close:,.0f}원\n**당일 최고 수익률:** `{high_return}`%\n**현재 수익률:** **`{current_return}`**% (PNL: `{pnl:,.0f}`원)",
+                "value": f"**진입/현재:** {price_format}\n**당일 최고 수익률:** `{high_return}`%\n**현재 수익률:** **`{current_return}`**% (PNL: `{pnl:,.0f}`원)",
                 "inline": False
             })
             time.sleep(0.5)
@@ -127,12 +135,10 @@ def generate_weekly_dca_report(market):
         if df.empty: return
 
         strategy_col = '전략(DCA/단타)' if '전략(DCA/단타)' in df.columns else '전략 (DCA/단타)'
-        dca_trades = df[df[strategy_col] == 'DCA'].copy()
+        market_korean = "국내" if market == "kr" else "미국" if market == "us" else "일본"
         
-        if market == 'kr':
-            dca_trades = dca_trades[dca_trades['티커'].str.contains('.KS|.KQ', na=False)]
-        elif market == 'us':
-            dca_trades = dca_trades[~dca_trades['티커'].str.contains('.KS|.KQ|.T', na=False)]
+        # 💡 DCA도 '시장' 컬럼으로 깔끔하게 필터링!
+        dca_trades = df[ (df[strategy_col] == 'DCA') & (df['시장'] == market_korean) ].copy()
             
         if dca_trades.empty:
             print(f"   {market.upper()} 시장 DCA 누적 기록이 없습니다.")
@@ -145,7 +151,6 @@ def generate_weekly_dca_report(market):
         for _, row in dca_trades.iterrows():
             ticker, stock_name, entry_price = row['티커'], row['종목명'], float(row['매수가'])
             investment = float(row.get('매수금액(원)', row.get('매수금액 (원)', 500000)))
-            
             shares = investment / entry_price
             
             hist = yf.Ticker(ticker).history(period="1d")
@@ -187,7 +192,7 @@ def generate_weekly_dca_report(market):
         print(f"❌ DCA 결산 실패: {e}")
 
 # ==========================================
-# 실행부 (💡 에러가 났던 원인인 --mode 가 이 부분에 제대로 들어가 있습니다!)
+# 실행부
 # ==========================================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
