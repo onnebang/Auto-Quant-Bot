@@ -145,11 +145,10 @@ def run_bot(market, mode):
                     if rsi < 30 and current_price <= bb_lower:
                         curr, chg, per, pbr, roe = get_deep_analysis(ticker, df)
                         
-                        # 구글 시트에 "5만원 매수" 가상 기록!
+                        # ⭐ 구글 시트에 "50만원 매수" 가상 기록!
                         if sheet:
                             time_str = datetime.now().strftime('%Y-%m-%d')
-                            # 시트 컬럼: [날짜, 전략, 시장, 종목명, 티커, 매수가, 매수금액]
-                            sheet.append_row([time_str, "DCA", market_name, stock_name, ticker, curr, 50000])
+                            sheet.append_row([time_str, "DCA", market_name, stock_name, ticker, curr, 500000]) # 500,000으로 수정
                         
                         fields = [
                             {"name": "📈 현재가", "value": f"**${curr}** ({chg}%)" if market=="us" else f"**{curr}원** ({chg}%)", "inline": True},
@@ -159,7 +158,7 @@ def run_bot(market, mode):
                         
                         msg_title = f"🛍️ [바겐세일 줍줍 타이밍!] {stock_name} ({ticker})"
                         msg_desc = (f"여러분! {stock_name} 주가가 볼린저 밴드를 뚫고 지하실로 내려갔습니다.\n"
-                                    f"공포에 사서 환희에 팔 시간입니다! 펀드매니저 봇이 가상 계좌에서 5만 원어치 자동 매수했습니다. 💸")
+                                    f"공포에 사서 환희에 팔 시간입니다! 펀드매니저 봇이 가상 계좌에서 50만 원어치 자동 매수했습니다. 💸")
                         
                         send_discord_msg(dca_webhook, msg_title, msg_desc, 16711680, fields)
 
@@ -175,10 +174,10 @@ def run_bot(market, mode):
                     if rsi_h < 40 and (macd_prev < 0 and macd_curr > 0):
                         curr, chg, per, pbr, roe = get_deep_analysis(ticker, df)
                         
-                        # 시트에 단타 포착 기록
+                        # ⭐ 시트에 단타 포착 기록 (50만원 매수)
                         if sheet:
                             time_str = datetime.now().strftime('%Y-%m-%d %H:%M')
-                            sheet.append_row([time_str, "단타", market_name, stock_name, ticker, curr, "모니터링 시작"])
+                            sheet.append_row([time_str, "단타", market_name, stock_name, ticker, curr, 500000]) # 500,000으로 수정
 
                         fields = [
                             {"name": "📈 현재가", "value": f"**${curr}** ({chg}%)" if market=="us" else f"**{curr}원** ({chg}%)", "inline": True},
@@ -188,7 +187,7 @@ def run_bot(market, mode):
                         
                         msg_title = f"⚡ [단기 반등 타이밍!] {stock_name} ({ticker})"
                         msg_desc = (f"단타 요정 출동! 🧚‍♂️ 하락하던 {stock_name} 주가가 방금 고개를 들고 MACD 골든크로스를 만들었습니다.\n"
-                                    f"짧게 치고 빠지실 분들, 타이밍 한 번 노려보시죠! (당일 마감 후 성적표 제출하겠습니다 📝)")
+                                    f"짧게 치고 빠지실 분들, 타이밍 한 번 노려보시죠! 가상 계좌에서 50만 원 진입했습니다. (당일 마감 후 성적표 제출하겠습니다 📝)")
                         
                         color = 16711680 if chg > 0 else 255
                         send_discord_msg(danta_webhook, msg_title, msg_desc, color, fields)
