@@ -9,6 +9,7 @@ import os
 import json
 import gspread
 from google.oauth2.service_account import Credentials
+from datetime import datetime, timedelta # timedelta를 추가합니다.
 
 # ==========================================
 # 1. 환경 변수 및 디스코드 웹훅 설정
@@ -132,6 +133,7 @@ def run_bot(market, mode):
             if (i+1) % 20 == 0: print(f"   진행률: {i+1}/{len(tickers)}")
             stock = yf.Ticker(ticker)
             stock_name = ticker_dict[ticker] # 한글 종목명 가져오기
+            now_kst = datetime.utcnow() + timedelta(hours=9)
             
             # [전략 A] DCA (장기 가치투자)
             if mode == "dca":
@@ -147,7 +149,7 @@ def run_bot(market, mode):
                         
                         # ⭐ 구글 시트에 "50만원 매수" 가상 기록!
                         if sheet:
-                            time_str = datetime.now().strftime('%Y-%m-%d')
+                            time_str = now_kst.strftime('%Y-%m-%d')
                             sheet.append_row([time_str, "DCA", market_name, stock_name, ticker, curr, 500000]) # 500,000으로 수정
                         
                         fields = [
@@ -176,7 +178,7 @@ def run_bot(market, mode):
                         
                         # ⭐ 시트에 단타 포착 기록 (50만원 매수)
                         if sheet:
-                            time_str = datetime.now().strftime('%Y-%m-%d %H:%M')
+                            time_str = now_kst.strftime('%Y-%m-%d %H:%M')
                             sheet.append_row([time_str, "단타", market_name, stock_name, ticker, curr, 500000]) # 500,000으로 수정
 
                         fields = [
