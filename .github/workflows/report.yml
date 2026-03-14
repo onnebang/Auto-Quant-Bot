@@ -58,9 +58,11 @@ jobs:
           fi
         fi
         
-        # 3. 수동 실행(workflow_dispatch) 테스트용
+        # 3. 수동 실행(workflow_dispatch) 테스트용 풀가동!
         if [ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]; then
-          echo "수동 테스트: 한국 단타 & 한국 DCA 리포트를 쏩니다!"
+          echo "수동 테스트: 4개 리포트 동시 발사!"
           python report.py --market kr --mode danta
+          python report.py --market us --mode danta
           python report.py --market kr --mode dca
+          python report.py --market us --mode dca
         fi
