@@ -6,9 +6,12 @@ from datetime import datetime
 import time
 import argparse
 import os
+import json
+import gspread
+from google.oauth2.service_account import Credentials
 
 # ==========================================
-# 1. 디스코드 웹훅 URL (GitHub Secrets 환경변수 사용)
+# 1. 환경 변수 및 디스코드 웹훅 설정
 # ==========================================
 WEBHOOK_URLS = {
     "KR_DCA": os.getenv("WEBHOOK_KR_DCA"),
@@ -21,41 +24,66 @@ WEBHOOK_URLS = {
 
 def send_discord_msg(webhook_url, title, description, color, fields=[]):
     if not webhook_url or not webhook_url.startswith("http"): return
-    
     data = {
         "embeds": [{
             "title": title,
             "description": description,
             "color": color,
-            "fields": fields, # 표 형태의 데이터를 담는 섹션
-            "footer": {"text": f"분석 시간: {datetime.now().strftime('%Y-%m-%d %H:%M')}"},
-            "thumbnail": {"url": "https://cdn-icons-png.flaticon.com/512/2422/2422796.png"} # 주식 아이콘 추가
+            "fields": fields,
+            "footer": {"text": f"🤖 펀드매니저 봇 | 분석 시간: {datetime.now().strftime('%Y-%m-%d %H:%M')}"},
+            "thumbnail": {"url": "https://cdn-icons-png.flaticon.com/512/2422/2422796.png"}
         }]
     }
     requests.post(webhook_url, json=data)
+
 # ==========================================
-# 2. 시장별 유니버스 구성 (한국, 미국, 일본)
+# 2. 구글 시트 연동 함수
 # ==========================================
-def get_universe(market):
+def init_gsheets():
+    try:
+        json_creds = os.getenv("GCP_SERVICE_ACCOUNT_JSON")
+        if not json_creds: 
+            print("⚠️ 구글 시트 JSON 키가 없습니다. 시트 기록은 건너뜁니다.")
+            return None
+        creds_dict = json.loads(json_creds)
+        scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+        credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        client = gspread.authorize(credentials)
+        # 1단계에서 만드신 시트 이름과 워크시트 이름을 정확히 맞춰주세요.
+        sheet = client.open("QuantBot_Fund").worksheet("Portfolio")
+        return sheet
+    except Exception as e:
+        print(f"❌ 구글 시트 연동 실패: {e}")
+        return None
+
+# ==========================================
+# 3. 시장별 유니버스 (종목 티커 + 이름 매칭)
+# ==========================================
+def get_universe_dict(market):
+    ticker_dict = {}
     if market == "kr":
         df_kr = fdr.StockListing('KOSPI')
         kr_mc_80 = df_kr.sort_values('Marcap', ascending=False).head(80)
         kr_vol_20 = df_kr[~df_kr['Code'].isin(kr_mc_80['Code'])].sort_values('Volume', ascending=False).head(20)
         kr_combined = pd.concat([kr_mc_80, kr_vol_20])
-        return [f"{code}.KS" for code in kr_combined['Code'].tolist()]
-    
+        for _, row in kr_combined.iterrows():
+            ticker_dict[f"{row['Code']}.KS"] = row['Name'] # 005930.KS : 삼성전자
+            
     elif market == "us":
         df_us = fdr.StockListing('S&P500')
-        return df_us['Symbol'].head(100).tolist()
-    
+        for _, row in df_us.head(100).iterrows():
+            ticker_dict[row['Symbol']] = row['Name'] # AAPL : Apple Inc.
+            
     elif market == "jp":
-        jp_codes = ["7203", "6758", "8306", "8035", "9984", "6861", "9432", "8058", "4063", "8316", 
-                    "7974", "8031", "6920", "7267", "6501", "4568", "8001", "8766", "8002", "3382",
-                    "6098", "6702", "4502", "7741", "4519", "6981", "7269", "4661", "8802", "9433"]
-        return [f"{code}.T" for code in jp_codes]
-    return []
+        jp_codes = {"7203": "도요타자동차", "6758": "소니그룹", "8306": "미쓰비시UFJ", "8035": "도쿄일렉트론", "9984": "소프트뱅크"}
+        for code, name in jp_codes.items():
+            ticker_dict[f"{code}.T"] = name
+            
+    return ticker_dict
 
-# 3. 보조지표 계산 및 심층 분석 함수 (동일)
+# ==========================================
+# 4. 보조지표 및 심층 분석 (유지)
+# ==========================================
 def calculate_indicators(df):
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -76,37 +104,36 @@ def get_deep_analysis(ticker, hist_df):
     stock = yf.Ticker(ticker)
     info = stock.info
     prev_close = hist_df['Close'].iloc[-2]
-    current = hist_df['Close'].iloc[-1]
+    current = round(hist_df['Close'].iloc[-1], 2)
     change_pct = round(((current - prev_close) / prev_close) * 100, 2)
-    change_icon = "🔺" if change_pct > 0 else "🔻"
-    vol_current = hist_df['Volume'].iloc[-1]
-    vol_avg_5d = hist_df['Volume'].tail(5).mean()
-    vol_surge = round((vol_current / vol_avg_5d) * 100, 1) if vol_avg_5d > 0 else 0
-    per = info.get('trailingPE', 'N/A')
-    pbr = info.get('priceToBook', 'N/A')
-    roe = info.get('returnOnEquity', 'N/A')
-    div = info.get('dividendYield', 'N/A')
-    if roe != 'N/A': roe = f"{round(roe * 100, 2)}%"
-    if div != 'N/A': div = f"{round(div * 100, 2)}%"
-    if per != 'N/A': per = round(per, 2)
-    if pbr != 'N/A': pbr = round(pbr, 2)
-    report = (f"**주가 변동:** ${current} ({change_icon}{change_pct}%)\n"
-              f"**수급 동향:** 거래량 {vol_surge}% (5일 평균대비)\n"
-              f"**가치 평가:** PER {per} / PBR {pbr}\n"
-              f"**수익/배당:** ROE {roe} / 배당 {div}")
-    return report, change_pct
+    
+    per = round(info.get('trailingPE', 0), 2) if info.get('trailingPE') else 'N/A'
+    pbr = round(info.get('priceToBook', 0), 2) if info.get('priceToBook') else 'N/A'
+    roe = f"{round(info.get('returnOnEquity', 0) * 100, 2)}%" if info.get('returnOnEquity') else 'N/A'
+    
+    return current, change_pct, per, pbr, roe
 
-# 4. 스캐닝 엔진
+# ==========================================
+# 5. 핵심 엔진 (친근한 알림 + 시트 기록)
+# ==========================================
 def run_bot(market, mode):
-    tickers = get_universe(market)
-    market_name = {"kr": "한국", "us": "미국", "jp": "일본"}[market]
+    ticker_dict = get_universe_dict(market)
+    tickers = list(ticker_dict.keys())
+    market_name = {"kr": "국내", "us": "미국", "jp": "일본"}[market]
     dca_webhook = WEBHOOK_URLS[f"{market.upper()}_DCA"]
     danta_webhook = WEBHOOK_URLS[f"{market.upper()}_DANTA"]
-    print(f"\n⚙️ [{market_name}] 시장 [{mode.upper()}] 전략 스캔 시작...")
+    
+    sheet = init_gsheets() # 구글 시트 연결
+    
+    print(f"\n⚙️ [{market_name}] 시장 [{mode.upper()}] 스캔 시작...")
+    
     for i, ticker in enumerate(tickers):
         try:
             if (i+1) % 20 == 0: print(f"   진행률: {i+1}/{len(tickers)}")
             stock = yf.Ticker(ticker)
+            stock_name = ticker_dict[ticker] # 한글 종목명 가져오기
+            
+            # [전략 A] DCA (장기 가치투자)
             if mode == "dca":
                 hist = stock.history(period="60d", interval="1d")
                 if len(hist) >= 26:
@@ -114,20 +141,29 @@ def run_bot(market, mode):
                     rsi = round(df['RSI'].iloc[-1], 2)
                     bb_lower = round(df['BB_Lower'].iloc[-1], 2)
                     current_price = df['Close'].iloc[-1]
+                    
                     if rsi < 30 and current_price <= bb_lower:
-                        # ... (지표 계산 후 타점 발생 시)
-                        deep_report, change_pct = get_deep_analysis(ticker, df)
-                        # 데이터를 쪼개서 필드로 구성
+                        curr, chg, per, pbr, roe = get_deep_analysis(ticker, df)
+                        
+                        # 구글 시트에 "5만원 매수" 가상 기록!
+                        if sheet:
+                            time_str = datetime.now().strftime('%Y-%m-%d')
+                            # 시트 컬럼: [날짜, 전략, 시장, 종목명, 티커, 매수가, 매수금액]
+                            sheet.append_row([time_str, "DCA", market_name, stock_name, ticker, curr, 50000])
+                        
                         fields = [
-                            {"name": "📈 현재가", "value": f"**{current_price}** ({change_pct}%)", "inline": True},
+                            {"name": "📈 현재가", "value": f"**${curr}** ({chg}%)" if market=="us" else f"**{curr}원** ({chg}%)", "inline": True},
                             {"name": "🌡️ RSI", "value": f"`{rsi}`", "inline": True},
-                            {"name": "📊 가치(PER/PBR)", "value": f"{per} / {pbr}", "inline": True},
-                            {"name": "💰 수익(ROE)", "value": f"{roe}", "inline": True},
-                            {"name": "🛡️ 부채율", "value": f"{debt}%", "inline": True},
-                            {"name": "🎁 배당율", "value": f"{div}", "inline": True}
+                            {"name": "📊 가치/수익", "value": f"PER {per} / ROE {roe}", "inline": True}
                         ]
                         
-                        send_discord_msg(dca_webhook, f"🚨 {ticker} DCA 매수 타점 포착", "극단적 과매도 구간에 진입하였습니다.", 16711680, fields)
+                        msg_title = f"🛍️ [바겐세일 줍줍 타이밍!] {stock_name} ({ticker})"
+                        msg_desc = (f"여러분! {stock_name} 주가가 볼린저 밴드를 뚫고 지하실로 내려갔습니다.\n"
+                                    f"공포에 사서 환희에 팔 시간입니다! 펀드매니저 봇이 가상 계좌에서 5만 원어치 자동 매수했습니다. 💸")
+                        
+                        send_discord_msg(dca_webhook, msg_title, msg_desc, 16711680, fields)
+
+            # [전략 B] 단타 / 스윙
             elif mode == "danta":
                 hist = stock.history(period="15d", interval="1h")
                 if len(hist) >= 26:
@@ -135,13 +171,30 @@ def run_bot(market, mode):
                     rsi_h = round(df['RSI'].iloc[-1], 2)
                     macd_curr = df['MACD_Hist'].iloc[-1]
                     macd_prev = df['MACD_Hist'].iloc[-2]
+                    
                     if rsi_h < 40 and (macd_prev < 0 and macd_curr > 0):
-                        deep_report, change_pct = get_deep_analysis(ticker, df)
-                        color = 16711680 if change_pct > 0 else 255
-                        msg = f"📈 **단기 반등 골든크로스 (60분봉 RSI: {rsi_h})**\n{deep_report}"
-                        send_discord_msg(danta_webhook, f"⚡ {ticker} 단기 스위 타점", msg, color)
+                        curr, chg, per, pbr, roe = get_deep_analysis(ticker, df)
+                        
+                        # 시트에 단타 포착 기록
+                        if sheet:
+                            time_str = datetime.now().strftime('%Y-%m-%d %H:%M')
+                            sheet.append_row([time_str, "단타", market_name, stock_name, ticker, curr, "모니터링 시작"])
+
+                        fields = [
+                            {"name": "📈 현재가", "value": f"**${curr}** ({chg}%)" if market=="us" else f"**{curr}원** ({chg}%)", "inline": True},
+                            {"name": "⏱️ 60분봉 RSI", "value": f"`{rsi_h}`", "inline": True},
+                            {"name": "📊 가치/수익", "value": f"PER {per} / ROE {roe}", "inline": True}
+                        ]
+                        
+                        msg_title = f"⚡ [단기 반등 타이밍!] {stock_name} ({ticker})"
+                        msg_desc = (f"단타 요정 출동! 🧚‍♂️ 하락하던 {stock_name} 주가가 방금 고개를 들고 MACD 골든크로스를 만들었습니다.\n"
+                                    f"짧게 치고 빠지실 분들, 타이밍 한 번 노려보시죠! (당일 마감 후 성적표 제출하겠습니다 📝)")
+                        
+                        color = 16711680 if chg > 0 else 255
+                        send_discord_msg(danta_webhook, msg_title, msg_desc, color, fields)
+                        
             time.sleep(0.1)
-        except:
+        except Exception as e:
             pass
 
 if __name__ == "__main__":
@@ -149,4 +202,5 @@ if __name__ == "__main__":
     parser.add_argument('--market', type=str, required=True, choices=['kr', 'us', 'jp'])
     parser.add_argument('--mode', type=str, required=True, choices=['dca', 'danta'])
     args = parser.parse_args()
+    
     run_bot(args.market, args.mode)
