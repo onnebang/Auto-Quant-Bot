@@ -65,7 +65,6 @@ def generate_daily_report(market):
         df['날짜'] = pd.to_datetime(df['날짜'])
         strategy_col = '전략(DCA/단타)' if '전략(DCA/단타)' in df.columns else '전략 (DCA/단타)'
         
-        # 💡 [핵심 수정] 시트의 '시장' 컬럼과 파이썬의 market 변수를 매칭하여 완벽 필터링!
         market_korean = "국내" if market == "kr" else "미국" if market == "us" else "일본"
         
         today_trades = df[ (df['날짜'].dt.strftime('%Y-%m-%d') == today_str) & 
@@ -96,7 +95,6 @@ def generate_daily_report(market):
             pnl = round(investment * (current_return / 100), 0)
             total_pnl += pnl
             
-            # 💡 [핵심 수정] 미국 주식은 달러($)로, 한국 주식은 원으로 표기! (수익금은 원화 유지)
             price_format = f"${entry_price:,.2f} / **${day_close:,.2f}**" if market == "us" else f"{entry_price:,.0f}원 / **{day_close:,.0f}원**"
             
             trades_summary.append({
@@ -122,7 +120,7 @@ def generate_daily_report(market):
         print(f"❌ 단타 결산 실패: {e}")
 
 # ==========================================
-# [기능 2] 주간 DCA 펀드 운용 리포트
+# [기능 2] 주간 DCA 펀드 운용 리포트 (수익금액 표시 추가!)
 # ==========================================
 def generate_weekly_dca_report(market):
     print(f"\n⚙️ [{market.upper()}] 시장 주간 DCA 포트폴리오 결산 중...")
@@ -137,7 +135,6 @@ def generate_weekly_dca_report(market):
         strategy_col = '전략(DCA/단타)' if '전략(DCA/단타)' in df.columns else '전략 (DCA/단타)'
         market_korean = "국내" if market == "kr" else "미국" if market == "us" else "일본"
         
-        # 💡 DCA도 '시장' 컬럼으로 깔끔하게 필터링!
         dca_trades = df[ (df[strategy_col] == 'DCA') & (df['시장'] == market_korean) ].copy()
             
         if dca_trades.empty:
@@ -147,6 +144,7 @@ def generate_weekly_dca_report(market):
         total_investment = 0
         total_current_value = 0
         performance_dict = {} 
+        pnl_dict = {} # 💡 추가: 종목별 수익금(원)을 저장할 딕셔너리
 
         for _, row in dca_trades.iterrows():
             ticker, stock_name, entry_price = row['티커'], row['종목명'], float(row['매수가'])
@@ -163,7 +161,10 @@ def generate_weekly_dca_report(market):
             total_current_value += current_value
             
             return_pct = ((current_price - entry_price) / entry_price) * 100
+            pnl_amount = current_value - investment # 💡 추가: 개별 종목 수익금
+            
             performance_dict[stock_name] = return_pct
+            pnl_dict[stock_name] = pnl_amount # 💡 추가: 딕셔너리에 수익금 저장
             time.sleep(0.5)
 
         total_pnl = total_current_value - total_investment
@@ -171,6 +172,19 @@ def generate_weekly_dca_report(market):
         
         best_stock = max(performance_dict, key=performance_dict.get)
         worst_stock = min(performance_dict, key=performance_dict.get)
+        
+        # 💡 [핵심 추가] 전체 포트폴리오 문자열에 수익금(원) 추가!
+        sorted_perf = sorted(performance_dict.items(), key=lambda item: item[1], reverse=True)
+        portfolio_str = ""
+        for name, ret in sorted_perf:
+            pnl = pnl_dict[name]
+            icon = "🔴" if ret > 0 else ("🔵" if ret < 0 else "⚪")
+            sign = "+" if pnl > 0 else "" # 양수일 때는 앞에 + 기호 붙이기
+            portfolio_str += f"{icon} **{name}**: `{ret:.2f}%` ({sign}{pnl:,.0f}원)\n"
+
+        # 디스코드 필드 글자 수 제한(1024자) 안전장치
+        if len(portfolio_str) > 1000:
+            portfolio_str = portfolio_str[:990] + "...\n(이하 생략)"
         
         msg_title = f"💼 [{market.upper()}] 퀀트 봇 가상 펀드 주간 리포트"
         msg_desc = (f"여러분! 한 주 동안 봇이 바닥에서 줍줍한 DCA 가상 펀드 운용 결과입니다.\n"
@@ -181,7 +195,8 @@ def generate_weekly_dca_report(market):
             {"name": "📈 현재 평가금액", "value": f"**{total_current_value:,.0f}원**", "inline": True},
             {"name": "📊 펀드 총수익률", "value": f"**`{total_return_pct:,.2f}%`** (PNL: {total_pnl:,.0f}원)", "inline": False},
             {"name": f"🥇 최고 효자 종목", "value": f"**{best_stock}** (`{performance_dict[best_stock]:.2f}%`)", "inline": True},
-            {"name": f"🩹 아픈 손가락", "value": f"**{worst_stock}** (`{performance_dict[worst_stock]:.2f}%`)", "inline": True}
+            {"name": f"🩹 아픈 손가락", "value": f"**{worst_stock}** (`{performance_dict[worst_stock]:.2f}%`)", "inline": True},
+            {"name": "📋 전체 포트폴리오 현황", "value": portfolio_str, "inline": False}
         ]
         
         color = 16711680 if total_pnl > 0 else 255
