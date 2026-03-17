@@ -10,9 +10,9 @@ on:
     - cron: '45 19 * * 1-5'
 
     # --- [단타 & 불장 (장중 20분 간격으로 초정밀 스캔!)] ---
-    # 한국장 (KST 10:00~15:40) -> UTC 01:00~06:40
+    # 한국장 (KST 09:00~15:40) -> UTC 00:00~06:40
     - cron: '0,20,40 0-6 * * 1-5'
-    # 미국장 (KST 23:00~04:40) -> UTC 14:00~19:40
+    # 미국장 (KST 22:00~04:40) -> UTC 13:00~19:40
     - cron: '0,20,40 13-19 * * 1-5'
 
 jobs:
@@ -56,13 +56,13 @@ jobs:
           python main.py --market us --mode dca
           
         # 3. 한국장 장중 20분 간격 알람이 울렸을 때
-        elif [ "$CRON_SCHEDULE" == "0,20,40 1-6 * * 1-5" ]; then
+        elif [ "$CRON_SCHEDULE" == "0,20,40 0-6 * * 1-5" ]; then
           echo "🇰🇷 [한국장] 단타 & 불장 스캔 시작"
           python main.py --market kr --mode danta
           python main.py --market kr --mode bull
           
         # 4. 미국장 장중 20분 간격 알람이 울렸을 때
-        elif [ "$CRON_SCHEDULE" == "0,20,40 14-19 * * 1-5" ]; then
+        elif [ "$CRON_SCHEDULE" == "0,20,40 13-19 * * 1-5" ]; then
           echo "🇺🇸 [미국장] 단타 & 불장 스캔 시작"
           python main.py --market us --mode danta
           python main.py --market us --mode bull
