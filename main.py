@@ -187,19 +187,27 @@ def run_bot(market, mode):
     market_name = {"kr": "국내", "us": "미국", "jp": "일본"}[market]
     dca_webhook = WEBHOOK_URLS[f"{market.upper()}_DCA"]
     danta_webhook = WEBHOOK_URLS[f"{market.upper()}_DANTA"]
-    
-    # 💡 [수정] bull 모드도 danta 웹훅을 사용하도록 명시
     webhook_to_use = dca_webhook if mode == 'dca' else danta_webhook
     
     sheet = init_gsheets()
     
+    holding_tickers = [] # 💡 추가: 현재 들고 있는 종목 리스트
+    
     if sheet:
         check_sell_signals(sheet, market_name, mode, webhook_to_use)
+        
+        # 💡 [핵심 추가] 중복 매수 방지를 위해 시트에서 '보유중'인 종목을 모두 수집합니다.
+        records = sheet.get_all_records()
+        holding_tickers = [r.get('티커') for r in records if r.get('상태') in ['보유중', '매도알림완료']]
     
     print(f"\n⚙️ [{market_name}] 시장 [{mode.upper()}] 신규 타점 스캔 시작...")
     
     for i, ticker in enumerate(tickers):
         try:
+            # 💡 [핵심 추가] 이미 보유 중인 종목이면 과감하게 패스!
+            if ticker in holding_tickers:
+                continue
+
             if (i+1) % 20 == 0: print(f"   진행률: {i+1}/{len(tickers)}")
             stock = yf.Ticker(ticker)
             stock_name = ticker_dict[ticker]
