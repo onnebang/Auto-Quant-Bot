@@ -42,11 +42,13 @@ jobs:
 
         echo "서버 시간: $HOUR:$MINUTE / 요일: $DAY_OF_WEEK"
 
-        # 1. 단타 결산 (매일)
+        # 1. 단타 & 불장 결산 (매일)
         if [ "$HOUR" == "06" ] && [ "$MINUTE" == "40" ]; then
           python report.py --market kr --mode danta
+          python report.py --market kr --mode bull  # 👈 추가!
         elif [ "$HOUR" == "20" ] && [ "$MINUTE" == "10" ]; then
           python report.py --market us --mode danta
+          python report.py --market us --mode bull  # 👈 추가!
         fi
 
         # 2. DCA 주간 리포트 (금요일에만)
@@ -58,11 +60,14 @@ jobs:
           fi
         fi
         
-        # 3. 수동 실행(workflow_dispatch) 테스트용 풀가동!
+        # 3. 수동 실행(workflow_dispatch) 테스트용
         if [ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]; then
-          echo "수동 테스트: 4개 리포트 동시 발사!"
+          echo "수동 테스트: 단타, 불장, DCA 풀가동!"
           python report.py --market kr --mode danta
-          python report.py --market us --mode danta
+          python report.py --market kr --mode bull  # 👈 추가!
           python report.py --market kr --mode dca
+          # 미국장 테스트가 필요하시면 아래 주석을 푸세요
+          python report.py --market us --mode danta
+          python report.py --market us --mode bull
           python report.py --market us --mode dca
         fi
