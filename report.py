@@ -49,10 +49,16 @@ def init_gsheets():
         return None
 
 # ==========================================
-# [기능 1] 당일 단타 결산
+# [기능 1] 당일 단타 & 불장 결산 (통합)
 # ==========================================
-def generate_daily_report(market):
-    print(f"\n⚙️ [{market.upper()}] 시장 당일 단타 성적표 작성 중...")
+def generate_daily_report(market, mode):
+    # 💡 모드에 따라 이름과 아이콘을 다르게 설정합니다.
+    strategy_name = "단타" if mode == "danta" else "불장"
+    icon = "🏆" if mode == "danta" else "🦁"
+    
+    print(f"\n⚙️ [{market.upper()}] 시장 당일 {strategy_name} 성적표 작성 중...")
+    
+    # 불장 모드도 단타 채널에 성적표를 쏩니다.
     webhook_url = WEBHOOK_URLS[f"{market.upper()}_DANTA_REPORT"]
     sheet = init_gsheets()
     if not sheet: return
@@ -68,11 +74,11 @@ def generate_daily_report(market):
         market_korean = "국내" if market == "kr" else "미국" if market == "us" else "일본"
         
         today_trades = df[ (df['날짜'].dt.strftime('%Y-%m-%d') == today_str) & 
-                           (df[strategy_col] == '단타') & 
+                           (df[strategy_col] == strategy_name) & 
                            (df['시장'] == market_korean) ]
         
         if today_trades.empty:
-            msg_title = f"☕ [오늘의 {market.upper()} 단타 성적표] - 진입 없음"
+            msg_title = f"☕ [오늘의 {market.upper()} {strategy_name} 성적표] - 진입 없음"
             msg_desc = "오늘은 봇이 조용했습니다. 매니저도 커피 한 잔의 여유를 즐기겠습니다."
             send_discord_report(webhook_url, msg_title, msg_desc, 255)
             return
@@ -98,7 +104,7 @@ def generate_daily_report(market):
             price_format = f"${entry_price:,.2f} / **${day_close:,.2f}**" if market == "us" else f"{entry_price:,.0f}원 / **{day_close:,.0f}원**"
             
             trades_summary.append({
-                "name": f"🏆 {stock_name} ({ticker})",
+                "name": f"{icon} {stock_name} ({ticker})",
                 "value": f"**진입/현재:** {price_format}\n**당일 최고 수익률:** `{high_return}`%\n**현재 수익률:** **`{current_return}`**% (PNL: `{pnl:,.0f}`원)",
                 "inline": False
             })
@@ -107,20 +113,20 @@ def generate_daily_report(market):
         initial_balance = 10000000
         total_return = round(((total_pnl / initial_balance) * 100), 2)
         
-        msg_title = f"🏆 [오늘의 {market.upper()} 단타 성적표]"
-        msg_desc = f"오늘 단타봇이 총 {len(today_trades)}종목에 투자했습니다. (총 투자금: {total_investment:,.0f}원)"
+        msg_title = f"{icon} [오늘의 {market.upper()} {strategy_name} 성적표]"
+        msg_desc = f"오늘 {strategy_name} 봇이 총 {len(today_trades)}종목에 탑승했습니다. (총 투자금: {total_investment:,.0f}원)"
         summary_fields = trades_summary + [
             {"name": "💵 오늘의 총수익금", "value": f"**`{total_pnl:,.0f}`**원 ({total_return}%)", "inline": True},
             {"name": "💼 현재 가상 잔고", "value": f"{initial_balance + total_pnl:,.0f}원", "inline": True}
         ]
         
         send_discord_report(webhook_url, msg_title, msg_desc, 16711680 if total_pnl > 0 else 255, summary_fields)
-        print(f"✨ [{market.upper()}] 단타 결산 완료!")
+        print(f"✨ [{market.upper()}] {strategy_name} 결산 완료!")
     except Exception as e:
-        print(f"❌ 단타 결산 실패: {e}")
+        print(f"❌ {strategy_name} 결산 실패: {e}")
 
 # ==========================================
-# [기능 2] 주간 DCA 펀드 운용 리포트 (수익금액 표시 추가!)
+# [기능 2] 주간 DCA 펀드 운용 리포트 (유지)
 # ==========================================
 def generate_weekly_dca_report(market):
     print(f"\n⚙️ [{market.upper()}] 시장 주간 DCA 포트폴리오 결산 중...")
@@ -141,10 +147,8 @@ def generate_weekly_dca_report(market):
             print(f"   {market.upper()} 시장 DCA 누적 기록이 없습니다.")
             return
 
-        total_investment = 0
-        total_current_value = 0
-        performance_dict = {} 
-        pnl_dict = {} # 💡 추가: 종목별 수익금(원)을 저장할 딕셔너리
+        total_investment, total_current_value = 0, 0
+        performance_dict, pnl_dict = {}, {} 
 
         for _, row in dca_trades.iterrows():
             ticker, stock_name, entry_price = row['티커'], row['종목명'], float(row['매수가'])
@@ -161,10 +165,10 @@ def generate_weekly_dca_report(market):
             total_current_value += current_value
             
             return_pct = ((current_price - entry_price) / entry_price) * 100
-            pnl_amount = current_value - investment # 💡 추가: 개별 종목 수익금
+            pnl_amount = current_value - investment 
             
             performance_dict[stock_name] = return_pct
-            pnl_dict[stock_name] = pnl_amount # 💡 추가: 딕셔너리에 수익금 저장
+            pnl_dict[stock_name] = pnl_amount 
             time.sleep(0.5)
 
         total_pnl = total_current_value - total_investment
@@ -173,16 +177,14 @@ def generate_weekly_dca_report(market):
         best_stock = max(performance_dict, key=performance_dict.get)
         worst_stock = min(performance_dict, key=performance_dict.get)
         
-        # 💡 [핵심 추가] 전체 포트폴리오 문자열에 수익금(원) 추가!
         sorted_perf = sorted(performance_dict.items(), key=lambda item: item[1], reverse=True)
         portfolio_str = ""
         for name, ret in sorted_perf:
             pnl = pnl_dict[name]
             icon = "🔴" if ret > 0 else ("🔵" if ret < 0 else "⚪")
-            sign = "+" if pnl > 0 else "" # 양수일 때는 앞에 + 기호 붙이기
+            sign = "+" if pnl > 0 else "" 
             portfolio_str += f"{icon} **{name}**: `{ret:.2f}%` ({sign}{pnl:,.0f}원)\n"
 
-        # 디스코드 필드 글자 수 제한(1024자) 안전장치
         if len(portfolio_str) > 1000:
             portfolio_str = portfolio_str[:990] + "...\n(이하 생략)"
         
@@ -212,10 +214,12 @@ def generate_weekly_dca_report(market):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--market', type=str, required=True, choices=['kr', 'us', 'jp'])
-    parser.add_argument('--mode', type=str, required=True, choices=['danta', 'dca'])
+    # 💡 choices에 'bull' 추가!
+    parser.add_argument('--mode', type=str, required=True, choices=['danta', 'dca', 'bull'])
     args = parser.parse_args()
     
-    if args.mode == 'danta':
-        generate_daily_report(args.market)
+    # 단타와 불장은 동일하게 daily_report 함수를 태웁니다.
+    if args.mode in ['danta', 'bull']:
+        generate_daily_report(args.market, args.mode)
     elif args.mode == 'dca':
         generate_weekly_dca_report(args.market)
