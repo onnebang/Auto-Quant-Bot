@@ -262,13 +262,61 @@ def run_bot(market, mode):
                         send_discord_msg(danta_webhook, msg_title, msg_desc, color, fields)
                         
             time.sleep(0.1)
+
+            # [전략 C] 🔥 불장 전용: 야수의 심장 (눌림목/돌파)
+            elif mode == "bull":
+                hist = stock.history(period="90d", interval="1d") # 일봉 기준으로 굵직한 추세 확인
+                if len(hist) >= 65:
+                    df = calculate_indicators(hist)
+                    
+                    # 현재 및 이전 데이터
+                    curr_close = df['Close'].iloc[-1]
+                    curr_vol = df['Volume'].iloc[-1]
+                    ma20 = df['MA20'].iloc[-1]
+                    ma60 = df['MA60'].iloc[-1]
+                    high20_prev = df['High20'].iloc[-2] # 어제까지의 20일 최고가
+                    vol20_prev = df['Vol20'].iloc[-2] # 평균 거래량
+                    rsi = round(df['RSI'].iloc[-1], 2)
+                    
+                    bull_reason = ""
+                    
+                    # 💡 조건 1: 눌림목 (정배열 상태에서 20일선 근처로 예쁘게 조정을 받을 때)
+                    if curr_close > ma60 and (ma20 * 0.98 <= curr_close <= ma20 * 1.02) and rsi < 55:
+                        bull_reason = "📉 [눌림목 포착] 상승 추세 속 예쁜 조정을 받았습니다! 20일선 반등 기대!"
+                        
+                    # 💡 조건 2: 강력 돌파 (전고점을 뚫고 거래량이 2배 이상 터질 때)
+                    elif curr_close > high20_prev and curr_vol > (vol20_prev * 2):
+                        bull_reason = "🚀 [전고점 돌파] 엄청난 거래량과 함께 저항선을 뚫었습니다! 투더문 탑승!"
+                    
+                    # 두 조건 중 하나라도 만족하면 알림 발송!
+                    if bull_reason:
+                        curr, chg, per, pbr, roe = get_deep_analysis(ticker, df)
+                        
+                        if sheet:
+                            time_str = (datetime.utcnow() + timedelta(hours=9)).strftime('%Y-%m-%d %H:%M')
+                            # 불장 모드는 전략 이름을 '불장'으로 기록
+                            sheet.append_row([time_str, "불장", market_name, stock_name, ticker, curr, 500000, "보유중"])
+
+                        fields = [
+                            {"name": "📈 현재가", "value": f"**${curr}** ({chg}%)" if market=="us" else f"**{curr}원** ({chg}%)", "inline": True},
+                            {"name": "🔥 포착 사유", "value": f"{bull_reason}", "inline": False},
+                            {"name": "📊 가치/수익", "value": f"PER {per} / ROE {roe}", "inline": True}
+                        ]
+                        
+                        msg_title = f"🦁 [야수의 심장 타이밍!] {stock_name} ({ticker})"
+                        msg_desc = (f"도파민 펀드매니저 출동! 🔥 상승장에 올라탈 시간입니다.\n"
+                                    f"가상 계좌에서 50만 원 시원하게 긁었습니다. 꽉 잡으세요!")
+                        
+                        send_discord_msg(danta_webhook, msg_title, msg_desc, 16753920, fields) # 주황색 알림
+        
         except Exception as e:
             pass
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--market', type=str, required=True, choices=['kr', 'us', 'jp'])
-    parser.add_argument('--mode', type=str, required=True, choices=['dca', 'danta'])
+    # 💡 choices에 'bull' 추가!
+    parser.add_argument('--mode', type=str, required=True, choices=['dca', 'danta', 'bull']) 
     args = parser.parse_args()
     
     run_bot(args.market, args.mode)
