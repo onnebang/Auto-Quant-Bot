@@ -76,19 +76,16 @@ def calculate_indicators(df):
     rs = gain / loss
     df['RSI'] = 100 - (100 / (1 + rs))
     
-    # 볼린저 밴드
     df['BB_Mid'] = df['Close'].rolling(window=20).mean()
     df['BB_Std'] = df['Close'].rolling(window=20).std()
     df['BB_Lower'] = df['BB_Mid'] - (df['BB_Std'] * 2)
     
-    # MACD
     exp1 = df['Close'].ewm(span=12, adjust=False).mean()
     exp2 = df['Close'].ewm(span=26, adjust=False).mean()
     df['MACD'] = exp1 - exp2
     df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
     df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
     
-    # 🔥 불장 모드 전용 지표
     df['MA20'] = df['Close'].rolling(window=20).mean()
     df['MA60'] = df['Close'].rolling(window=60).mean()
     df['High20'] = df['High'].rolling(window=20).max()
@@ -108,7 +105,7 @@ def get_deep_analysis(ticker, hist_df):
     return current, change_pct, per, pbr, roe
 
 # ==========================================
-# 🌟 매도 시그널 모니터링 (수정 완료)
+# 매도 시그널 모니터링 (유지)
 # ==========================================
 def check_sell_signals(sheet, market_name, mode, webhook_url):
     print(f"🔍 [{market_name}] 시장 [{mode.upper()}] 보유 종목 매도 시그널 검사 중...")
@@ -117,8 +114,6 @@ def check_sell_signals(sheet, market_name, mode, webhook_url):
         for idx, row in enumerate(records):
             row_num = idx + 2
             strategy_col = '전략(DCA/단타)' if '전략(DCA/단타)' in row else '전략 (DCA/단타)'
-            
-            # 💡 [수정] 모드별로 시트에서 찾아야 할 이름 매칭 (bull -> 불장)
             target_strategy = 'DCA' if mode == 'dca' else ('불장' if mode == 'bull' else '단타')
             
             if row.get('시장') != market_name or row.get(strategy_col, '') != target_strategy:
@@ -135,29 +130,23 @@ def check_sell_signals(sheet, market_name, mode, webhook_url):
             stock_name = row.get('종목명', ticker)
             
             stock = yf.Ticker(ticker)
-            # 불장도 단타처럼 빠른 대응을 위해 60분봉 스캔
             hist = stock.history(period="15d", interval="1h") if mode in ["danta", "bull"] else stock.history(period="60d", interval="1d")
             if len(hist) < 26: continue
             
             df = calculate_indicators(hist)
             current_price = df['Close'].iloc[-1]
             profit_pct = ((current_price - entry_price) / entry_price) * 100
-            
             rsi = round(df['RSI'].iloc[-1], 2)
             macd_curr = df['MACD_Hist'].iloc[-1]
             macd_prev = df['MACD_Hist'].iloc[-2]
             
             sell_reason = ""
-            # 🎯 공통: 목표 수익률 5% 달성
             if profit_pct >= 5.0:
                 sell_reason = f"🎯 목표 수익률 5% 달성! (현재 **+{profit_pct:.2f}%**)"
-            # 🚨 단타 매도 조건
             elif mode == "danta" and (rsi > 70 or (macd_prev > 0 and macd_curr < 0)):
                 sell_reason = f"🚨 단기 상승 추세가 꺾였습니다! (RSI: {rsi}, MACD 데드크로스)"
-            # 🚨 불장 매도 조건 (빠른 모멘텀 이탈 감지)
             elif mode == "bull" and (macd_prev > 0 and macd_curr < 0):
                 sell_reason = f"🚨 야수의 심장 모멘텀 이탈! (MACD 데드크로스) 빠른 청산 권장!"
-            # 🚨 DCA 매도 조건
             elif mode == "dca" and rsi > 70:
                 sell_reason = f"🚨 과열 구간 진입! 일부 수익 실현을 고려해보세요. (RSI: {rsi})"
                 
@@ -170,7 +159,6 @@ def check_sell_signals(sheet, market_name, mode, webhook_url):
                     {"name": "📈 수익률", "value": f"**{profit_pct:.2f}%**", "inline": True},
                     {"name": "⏱️ 현재 RSI", "value": f"`{rsi}`", "inline": True}
                 ]
-                
                 send_discord_msg(webhook_url, msg_title, msg_desc, 3066993, fields)
                 sheet.update_cell(row_num, 8, '매도알림완료')
                 time.sleep(1)
@@ -179,7 +167,7 @@ def check_sell_signals(sheet, market_name, mode, webhook_url):
         print(f"❌ 매도 시그널 검사 실패: {e}")
 
 # ==========================================
-# 핵심 엔진
+# 핵심 엔진 (종합 알림 기능 탑재!)
 # ==========================================
 def run_bot(market, mode):
     ticker_dict = get_universe_dict(market)
@@ -190,21 +178,20 @@ def run_bot(market, mode):
     webhook_to_use = dca_webhook if mode == 'dca' else danta_webhook
     
     sheet = init_gsheets()
-    
-    holding_tickers = [] # 💡 추가: 현재 들고 있는 종목 리스트
+    holding_tickers = []
     
     if sheet:
         check_sell_signals(sheet, market_name, mode, webhook_to_use)
-        
-        # 💡 [핵심 추가] 중복 매수 방지를 위해 시트에서 '보유중'인 종목을 모두 수집합니다.
         records = sheet.get_all_records()
         holding_tickers = [r.get('티커') for r in records if r.get('상태') in ['보유중', '매도알림완료']]
     
     print(f"\n⚙️ [{market_name}] 시장 [{mode.upper()}] 신규 타점 스캔 시작...")
     
+    # 💡 [핵심] 이번 스캔에서 포착된 종목들을 모아둘 장바구니 리스트!
+    detected_stocks = []
+    
     for i, ticker in enumerate(tickers):
         try:
-            # 💡 [핵심 추가] 이미 보유 중인 종목이면 과감하게 패스!
             if ticker in holding_tickers:
                 continue
 
@@ -222,19 +209,15 @@ def run_bot(market, mode):
                     
                     if rsi < 30 and current_price <= bb_lower:
                         curr, chg, per, pbr, roe = get_deep_analysis(ticker, df)
-                        
                         if sheet:
                             time_str = (datetime.utcnow() + timedelta(hours=9)).strftime('%Y-%m-%d')
                             sheet.append_row([time_str, "DCA", market_name, stock_name, ticker, curr, 500000, "보유중"])
                         
-                        fields = [
-                            {"name": "📈 현재가", "value": f"**${curr}** ({chg}%)" if market=="us" else f"**{curr}원** ({chg}%)", "inline": True},
-                            {"name": "🌡️ RSI", "value": f"`{rsi}`", "inline": True},
-                            {"name": "📊 가치/수익", "value": f"PER {per} / ROE {roe}", "inline": True}
-                        ]
-                        msg_title = f"🛍️ [바겐세일 줍줍 타이밍!] {stock_name} ({ticker})"
-                        msg_desc = "공포에 사서 환희에 팔 시간입니다! 펀드매니저 봇이 가상 계좌에서 50만 원어치 자동 매수했습니다. 💸"
-                        send_discord_msg(dca_webhook, msg_title, msg_desc, 16711680, fields)
+                        # 장바구니에 담기
+                        detected_stocks.append({
+                            "name": stock_name, "ticker": ticker, "curr": curr, "chg": chg, 
+                            "reason": f"RSI {rsi} / 볼린저 밴드 하단 이탈", "per": per, "roe": roe
+                        })
 
             elif mode == "danta":
                 hist = stock.history(period="15d", interval="1h")
@@ -246,19 +229,14 @@ def run_bot(market, mode):
                     
                     if rsi_h < 40 and (macd_prev < 0 and macd_curr > 0):
                         curr, chg, per, pbr, roe = get_deep_analysis(ticker, df)
-                        
                         if sheet:
                             time_str = (datetime.utcnow() + timedelta(hours=9)).strftime('%Y-%m-%d %H:%M')
                             sheet.append_row([time_str, "단타", market_name, stock_name, ticker, curr, 500000, "보유중"])
 
-                        fields = [
-                            {"name": "📈 현재가", "value": f"**${curr}** ({chg}%)" if market=="us" else f"**{curr}원** ({chg}%)", "inline": True},
-                            {"name": "⏱️ 60분봉 RSI", "value": f"`{rsi_h}`", "inline": True},
-                            {"name": "📊 가치/수익", "value": f"PER {per} / ROE {roe}", "inline": True}
-                        ]
-                        msg_title = f"⚡ [단기 반등 타이밍!] {stock_name} ({ticker})"
-                        msg_desc = "단타 요정 출동! 🧚‍♂️ 고개를 들고 MACD 골든크로스를 만들었습니다. 타이밍 한 번 노려보시죠!"
-                        send_discord_msg(danta_webhook, msg_title, msg_desc, 16711680 if chg > 0 else 255, fields)
+                        detected_stocks.append({
+                            "name": stock_name, "ticker": ticker, "curr": curr, "chg": chg, 
+                            "reason": f"RSI {rsi_h} / MACD 골든크로스", "per": per, "roe": roe
+                        })
 
             elif mode == "bull":
                 hist = stock.history(period="90d", interval="1d")
@@ -275,31 +253,65 @@ def run_bot(market, mode):
                     
                     bull_reason = ""
                     if curr_close > ma60 and (ma20 * 0.98 <= curr_close <= ma20 * 1.02) and rsi < 55:
-                        bull_reason = "📉 [눌림목 포착] 상승 추세 속 예쁜 조정을 받았습니다! 20일선 반등 기대!"
+                        bull_reason = "📉 [눌림목] 20일선 부근 예쁜 조정"
                     elif curr_close > high20_prev and curr_vol > (vol20_prev * 2):
-                        bull_reason = "🚀 [전고점 돌파] 엄청난 거래량과 함께 저항선을 뚫었습니다! 투더문 탑승!"
+                        bull_reason = "🚀 [돌파] 거래량 폭발 전고점 돌파"
                     
                     if bull_reason:
                         curr, chg, per, pbr, roe = get_deep_analysis(ticker, df)
-                        
                         if sheet:
                             time_str = (datetime.utcnow() + timedelta(hours=9)).strftime('%Y-%m-%d %H:%M')
                             sheet.append_row([time_str, "불장", market_name, stock_name, ticker, curr, 500000, "보유중"])
 
-                        fields = [
-                            {"name": "📈 현재가", "value": f"**${curr}** ({chg}%)" if market=="us" else f"**{curr}원** ({chg}%)", "inline": True},
-                            {"name": "🔥 포착 사유", "value": f"{bull_reason}", "inline": False},
-                            {"name": "📊 가치/수익", "value": f"PER {per} / ROE {roe}", "inline": True}
-                        ]
-                        msg_title = f"🦁 [야수의 심장 타이밍!] {stock_name} ({ticker})"
-                        msg_desc = "도파민 펀드매니저 출동! 🔥 상승장에 올라탈 시간입니다. 꽉 잡으세요!"
-                        send_discord_msg(danta_webhook, msg_title, msg_desc, 16753920, fields)
-
-            # 💡 [수정] 문법 오류 방지를 위해 if-elif 블록이 모두 끝난 들여쓰기 위치로 이동
+                        detected_stocks.append({
+                            "name": stock_name, "ticker": ticker, "curr": curr, "chg": chg, 
+                            "reason": bull_reason, "per": per, "roe": roe
+                        })
             time.sleep(0.1) 
-            
         except Exception as e:
             pass
+
+    # ==========================================
+    # 💡 [핵심] 스캔 종료 후 종합 리포트 한 번에 쏘기!
+    # ==========================================
+    if detected_stocks:
+        icon = "🦁" if mode == "bull" else ("⚡" if mode == "danta" else "🛍️")
+        strategy_kr = "야수의 심장(불장)" if mode == "bull" else ("단기 반등(단타)" if mode == "danta" else "바겐세일(DCA)")
+        
+        msg_title = f"{icon} [{market_name}] {strategy_kr} 타점 종합 리포트 (총 {len(detected_stocks)}종목)"
+        
+        if mode == "bull":
+            msg_desc = "도파민 펀드매니저 출동! 🔥 상승장에 올라탈 종목들을 종합해 왔습니다. 꽉 잡으세요!"
+            color = 16753920 # 주황색
+        elif mode == "danta":
+            msg_desc = "단타 요정 출동! 🧚‍♂️ 방금 고개를 든 단기 반등 예상 종목 리스트입니다."
+            color = 16711680 # 빨간색
+        else:
+            msg_desc = "공포에 사서 환희에 팔 시간입니다! 📉 지하실에 내려간 종목 리스트입니다."
+            color = 255 # 파란색
+
+        fields = []
+        # 디스코드 제한(25개)을 막기 위해 최대 15개까지만 리포트에 담습니다.
+        for item in detected_stocks[:15]:
+            price_str = f"${item['curr']:,.2f}" if market == "us" else f"{item['curr']:,.0f}원"
+            fields.append({
+                "name": f"🔹 {item['name']} ({item['ticker']})",
+                "value": f"**현재가:** {price_str} ({item['chg']}%)\n**사유:** {item['reason']}\n**가치/수익:** PER {item['per']} / ROE {item['roe']}",
+                "inline": False
+            })
+
+        if len(detected_stocks) > 15:
+            overflow = len(detected_stocks) - 15
+            fields.append({
+                "name": f"➕ 그 외 {overflow}건의 포착 종목 생략",
+                "value": "너무 많은 종목이 포착되어 리포트에 담지 못했습니다. 가상 펀드(구글 시트)를 확인하세요!",
+                "inline": False
+            })
+
+        send_discord_msg(webhook_to_use, msg_title, msg_desc, color, fields)
+        print(f"✨ 종합 알림 전송 완료! (포착 수: {len(detected_stocks)}건)")
+    else:
+        print(f"💤 이번 스캔에서는 조건에 맞는 종목이 발견되지 않았습니다.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
