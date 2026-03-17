@@ -75,14 +75,25 @@ def calculate_indicators(df):
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / loss
     df['RSI'] = 100 - (100 / (1 + rs))
+    
+    # 볼린저 밴드
     df['BB_Mid'] = df['Close'].rolling(window=20).mean()
     df['BB_Std'] = df['Close'].rolling(window=20).std()
     df['BB_Lower'] = df['BB_Mid'] - (df['BB_Std'] * 2)
+    
+    # MACD
     exp1 = df['Close'].ewm(span=12, adjust=False).mean()
     exp2 = df['Close'].ewm(span=26, adjust=False).mean()
     df['MACD'] = exp1 - exp2
     df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
     df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
+    
+    # 🔥 불장 모드 전용 지표 추가!
+    df['MA20'] = df['Close'].rolling(window=20).mean()
+    df['MA60'] = df['Close'].rolling(window=60).mean()
+    df['High20'] = df['High'].rolling(window=20).max() # 20일 전고점
+    df['Vol20'] = df['Volume'].rolling(window=20).mean() # 20일 평균 거래량
+    
     return df
 
 def get_deep_analysis(ticker, hist_df):
