@@ -1,21 +1,28 @@
-name: Quant Bot Scheduler
+name: Quant Bot Auto Run
 
 on:
   workflow_dispatch:
   schedule:
+    # --- [DCA 장기투자 (하루 1번)] ---
+    # 한국장 마감 전 (KST 15:15) -> UTC 06:15
     - cron: '15 6 * * 1-5' 
+    # 미국장 마감 전 (KST 04:45) -> UTC 19:45
     - cron: '45 19 * * 1-5'
+
+    # --- [단타 & 불장 (장중 30분 간격으로 초정밀 스캔!)] ---
+    # 한국장 (KST 10:00~15:30) -> UTC 01:00~06:30
     - cron: '0,20,40 0-6 * * 1-5'
+    # 미국장 (KST 23:00~04:30) -> UTC 14:00~19:30
     - cron: '0,20,40 13-19 * * 1-5'
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4 # 버전 업그레이드
+    - uses: actions/checkout@v4
     
     - name: Set up Python
-      uses: actions/setup-python@v5 # 버전 업그레이드
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
         
@@ -33,26 +40,37 @@ jobs:
         WEBHOOK_JP_DCA: ${{ secrets.WEBHOOK_JP_DCA }}
         WEBHOOK_JP_DANTA: ${{ secrets.WEBHOOK_JP_DANTA }}
         GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
-
       run: |
         HOUR=$(date -u +"%H")
         MINUTE=$(date -u +"%M")
         
-        # 1. 아시아 DCA (06:15)
+        echo "현재 서버 시간: $HOUR:$MINUTE (UTC)"
+
+        # 1. 한국장 DCA 
         if [ "$HOUR" == "06" ] && [ "$MINUTE" == "15" ]; then
           python main.py --market kr --mode dca
-          python main.py --market jp --mode dca
-        # 2. 미국 DCA (19:45)
+          
+        # 2. 미국장 DCA 
         elif [ "$HOUR" == "19" ] && [ "$MINUTE" == "45" ]; then
           python main.py --market us --mode dca
-        # 3. 아시아 단타 (01:00~06:00)
-        elif [ "$HOUR" -ge 01 ] && [ "$HOUR" -le 06 ]; then
+          
+        # 3. 한국장 장중 (단타 스캔 후 불장 스캔 연속 실행)
+        elif [[ "$HOUR" -ge "01" && "$HOUR" -le "06" ]]; then
+          echo "🇰🇷 한국장 단타 & 불장 스캔 시작"
           python main.py --market kr --mode danta
-          python main.py --market jp --mode danta
-        # 4. 미국 단타 (14:00~19:00)
-        elif [ "$HOUR" -ge 14 ] && [ "$HOUR" -le 19 ]; then
+          python main.py --market kr --mode bull
+          
+        # 4. 미국장 장중 (단타 스캔 후 불장 스캔 연속 실행)
+        elif [[ "$HOUR" -ge "14" && "$HOUR" -le "19" ]]; then
+          echo "🇺🇸 미국장 단타 & 불장 스캔 시작"
           python main.py --market us --mode danta
-        # 5. 그 외 시간 수동 실행 시 기본 동작
+          python main.py --market us --mode bull
+          
+        # 5. 수동 실행 (Run workflow 버튼 클릭 시)
         else
+          echo "테스트: 한국장/미국장 단타 & 불장 수동 스캔!"
           python main.py --market kr --mode danta
+          python main.py --market kr --mode bull
+          python main.py --market us --mode danta
+          python main.py --market us --mode bull
         fi
