@@ -9,10 +9,10 @@ on:
     # 미국장 마감 전 (KST 04:45) -> UTC 19:45
     - cron: '45 19 * * 1-5'
 
-    # --- [단타 & 불장 (장중 30분 간격으로 초정밀 스캔!)] ---
-    # 한국장 (KST 10:00~15:30) -> UTC 01:00~06:30
+    # --- [단타 & 불장 (장중 20분 간격으로 초정밀 스캔!)] ---
+    # 한국장 (KST 10:00~15:40) -> UTC 01:00~06:40
     - cron: '0,20,40 0-6 * * 1-5'
-    # 미국장 (KST 23:00~04:30) -> UTC 14:00~19:30
+    # 미국장 (KST 23:00~04:40) -> UTC 14:00~19:40
     - cron: '0,20,40 13-19 * * 1-5'
 
 jobs:
@@ -40,35 +40,36 @@ jobs:
         WEBHOOK_JP_DCA: ${{ secrets.WEBHOOK_JP_DCA }}
         WEBHOOK_JP_DANTA: ${{ secrets.WEBHOOK_JP_DANTA }}
         GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+        # 💡 핵심: 깃허브가 울린 알람 시간을 직접 변수로 가져옵니다!
+        CRON_SCHEDULE: ${{ github.event.schedule }}
       run: |
-        HOUR=$(date -u +"%H")
-        MINUTE=$(date -u +"%M")
-        
-        echo "현재 서버 시간: $HOUR:$MINUTE (UTC)"
+        echo "⏰ 울린 알람(Cron): $CRON_SCHEDULE"
 
-        # 1. 한국장 DCA 
-        if [ "$HOUR" == "06" ] && [ "$MINUTE" == "15" ]; then
+        # 1. 한국장 DCA 알람이 울렸을 때
+        if [ "$CRON_SCHEDULE" == "15 6 * * 1-5" ]; then
+          echo "💼 [한국장] DCA 스캔 시작"
           python main.py --market kr --mode dca
           
-        # 2. 미국장 DCA 
-        elif [ "$HOUR" == "19" ] && [ "$MINUTE" == "45" ]; then
+        # 2. 미국장 DCA 알람이 울렸을 때
+        elif [ "$CRON_SCHEDULE" == "45 19 * * 1-5" ]; then
+          echo "💼 [미국장] DCA 스캔 시작"
           python main.py --market us --mode dca
           
-        # 3. 한국장 장중 (단타 스캔 후 불장 스캔 연속 실행)
-        elif [[ "$HOUR" -ge "01" && "$HOUR" -le "06" ]]; then
-          echo "🇰🇷 한국장 단타 & 불장 스캔 시작"
+        # 3. 한국장 장중 20분 간격 알람이 울렸을 때
+        elif [ "$CRON_SCHEDULE" == "0,20,40 1-6 * * 1-5" ]; then
+          echo "🇰🇷 [한국장] 단타 & 불장 스캔 시작"
           python main.py --market kr --mode danta
           python main.py --market kr --mode bull
           
-        # 4. 미국장 장중 (단타 스캔 후 불장 스캔 연속 실행)
-        elif [[ "$HOUR" -ge "14" && "$HOUR" -le "19" ]]; then
-          echo "🇺🇸 미국장 단타 & 불장 스캔 시작"
+        # 4. 미국장 장중 20분 간격 알람이 울렸을 때
+        elif [ "$CRON_SCHEDULE" == "0,20,40 14-19 * * 1-5" ]; then
+          echo "🇺🇸 [미국장] 단타 & 불장 스캔 시작"
           python main.py --market us --mode danta
           python main.py --market us --mode bull
           
-        # 5. 수동 실행 (Run workflow 버튼 클릭 시)
+        # 5. 수동 실행 (Run workflow 버튼 클릭 시 알람 값이 없음)
         else
-          echo "테스트: 한국장/미국장 단타 & 불장 수동 스캔!"
+          echo "🛠️ 테스트: 한국장/미국장 단타 & 불장 수동 스캔!"
           python main.py --market kr --mode danta
           python main.py --market kr --mode bull
           python main.py --market us --mode danta
