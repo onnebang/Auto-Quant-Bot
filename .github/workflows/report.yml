@@ -32,41 +32,42 @@ jobs:
         GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
         WEBHOOK_KR_DANTA: ${{ secrets.WEBHOOK_KR_DANTA }}
         WEBHOOK_US_DANTA: ${{ secrets.WEBHOOK_US_DANTA }}
-        WEBHOOK_KR_DCA: ${{ secrets.WEBHOOK_KR_DCA }}   # 추가!
-        WEBHOOK_US_DCA: ${{ secrets.WEBHOOK_US_DCA }}   # 추가!
+        WEBHOOK_KR_DCA: ${{ secrets.WEBHOOK_KR_DCA }}
+        WEBHOOK_US_DCA: ${{ secrets.WEBHOOK_US_DCA }}
+        # 💡 핵심: 깃허브가 울린 알람 시간 자체를 변수로 가져옵니다!
+        CRON_SCHEDULE: ${{ github.event.schedule }}
         
       run: |
-        HOUR=$(date -u +"%H")
-        MINUTE=$(date -u +"%M")
-        DAY_OF_WEEK=$(date -u +"%u") # 5 = 금요일
+        echo "⏰ 울린 알람(Cron): $CRON_SCHEDULE"
 
-        echo "서버 시간: $HOUR:$MINUTE / 요일: $DAY_OF_WEEK"
-
-        # 1. 단타 & 불장 결산 (매일)
-        if [ "$HOUR" == "06" ] && [ "$MINUTE" == "40" ]; then
+        # 1. 한국장 단타 & 불장 결산 알람 ("40 6" 포함 여부)
+        if [[ "$CRON_SCHEDULE" == *"40 6"* ]]; then
+          echo "📝 [한국장] 당일 성적표 발송"
           python report.py --market kr --mode danta
-          python report.py --market kr --mode bull  # 👈 추가!
-        elif [ "$HOUR" == "20" ] && [ "$MINUTE" == "10" ]; then
+          python report.py --market kr --mode bull
+          
+        # 2. 미국장 단타 & 불장 결산 알람 ("10 20" 포함 여부)
+        elif [[ "$CRON_SCHEDULE" == *"10 20"* ]]; then
+          echo "📝 [미국장] 당일 성적표 발송"
           python report.py --market us --mode danta
-          python report.py --market us --mode bull  # 👈 추가!
-        fi
-
-        # 2. DCA 주간 리포트 (금요일에만)
-        if [ "$DAY_OF_WEEK" == "5" ]; then
-          if [ "$HOUR" == "06" ] && [ "$MINUTE" == "50" ]; then
-            python report.py --market kr --mode dca
-          elif [ "$HOUR" == "20" ] && [ "$MINUTE" == "20" ]; then
-            python report.py --market us --mode dca
-          fi
-        fi
-        
-        # 3. 수동 실행(workflow_dispatch) 테스트용
-        if [ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]; then
-          echo "수동 테스트: 단타, 불장, DCA 풀가동!"
-          python report.py --market kr --mode danta
-          python report.py --market kr --mode bull  # 👈 추가!
+          python report.py --market us --mode bull
+          
+        # 3. 한국장 주간 DCA 리포트 알람 ("50 6" 포함 여부)
+        elif [[ "$CRON_SCHEDULE" == *"50 6"* ]]; then
+          echo "💼 [한국장] 주간 DCA 성적표 발송"
           python report.py --market kr --mode dca
-          # 미국장 테스트가 필요하시면 아래 주석을 푸세요
+          
+        # 4. 미국장 주간 DCA 리포트 알람 ("20 20" 포함 여부)
+        elif [[ "$CRON_SCHEDULE" == *"20 20"* ]]; then
+          echo "💼 [미국장] 주간 DCA 성적표 발송"
+          python report.py --market us --mode dca
+          
+        # 5. 수동 실행 (Run workflow 버튼 클릭 시)
+        else
+          echo "🛠️ 수동 테스트: 단타, 불장, DCA 풀가동!"
+          python report.py --market kr --mode danta
+          python report.py --market kr --mode bull
+          python report.py --market kr --mode dca
           python report.py --market us --mode danta
           python report.py --market us --mode bull
           python report.py --market us --mode dca
