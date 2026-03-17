@@ -49,16 +49,14 @@ def init_gsheets():
         return None
 
 # ==========================================
-# [기능 1] 당일 단타 & 불장 결산 (통합)
+# [기능 1] 당일 단타 & 불장 결산 (에러 방어 무적 패치!)
 # ==========================================
 def generate_daily_report(market, mode):
-    # 💡 모드에 따라 이름과 아이콘을 다르게 설정합니다.
     strategy_name = "단타" if mode == "danta" else "불장"
     icon = "🏆" if mode == "danta" else "🦁"
     
     print(f"\n⚙️ [{market.upper()}] 시장 당일 {strategy_name} 성적표 작성 중...")
     
-    # 불장 모드도 단타 채널에 성적표를 쏩니다.
     webhook_url = WEBHOOK_URLS[f"{market.upper()}_DANTA_REPORT"]
     sheet = init_gsheets()
     if not sheet: return
@@ -68,12 +66,16 @@ def generate_daily_report(market, mode):
         if df.empty: return
 
         today_str = get_kst_time().strftime('%Y-%m-%d')
-        df['날짜'] = pd.to_datetime(df['날짜'])
-        strategy_col = '전략(DCA/단타)' if '전략(DCA/단타)' in df.columns else '전략 (DCA/단타)'
         
+        # 💡 [핵심 패치 1] 날짜 변환 시 에러 무시! (빈칸이나 문자가 섞여 있으면 NaT 처리해서 봇 생존)
+        df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
+        
+        strategy_col = '전략(DCA/단타)' if '전략(DCA/단타)' in df.columns else '전략 (DCA/단타)'
         market_korean = "국내" if market == "kr" else "미국" if market == "us" else "일본"
         
-        today_trades = df[ (df['날짜'].dt.strftime('%Y-%m-%d') == today_str) & 
+        # 💡 [핵심 패치 2] 날짜가 정상적인(notna) 행만 안전하게 필터링
+        today_trades = df[ (df['날짜'].notna()) & 
+                           (df['날짜'].dt.strftime('%Y-%m-%d') == today_str) & 
                            (df[strategy_col] == strategy_name) & 
                            (df['시장'] == market_korean) ]
         
@@ -86,8 +88,16 @@ def generate_daily_report(market, mode):
         trades_summary, total_pnl, total_investment = [], 0, 0
         
         for _, row in today_trades.iterrows():
-            ticker, stock_name, entry_price = row['티커'], row['종목명'], float(row['매수가'])
-            investment = float(row.get('매수금액(원)', row.get('매수금액 (원)', 500000)))
+            ticker = row['티커']
+            stock_name = row['종목명']
+            
+            # 💡 [핵심 패치 3] 매수가나 금액에 콤마(,)가 있거나 비어 있어도 죽지 않는 무적 코드
+            try:
+                entry_price = float(str(row['매수가']).replace(',', '').strip())
+                investment = float(str(row.get('매수금액(원)', row.get('매수금액 (원)', 500000))).replace(',', '').strip())
+            except Exception as e:
+                continue # 숫자 변환 실패 시 이 종목은 조용히 건너뜀 (봇 생존)
+                
             total_investment += investment
             
             hist = yf.Ticker(ticker).history(period="1d", interval="5m")
@@ -109,8 +119,7 @@ def generate_daily_report(market, mode):
                 "inline": False
             })
             time.sleep(0.5)
-
-        # 💡 [신규 추가] 디스코드 25개 제한 방어 로직!
+            
         if len(trades_summary) > 20:
             overflow_count = len(trades_summary) - 20
             trades_summary = trades_summary[:20]
@@ -121,7 +130,6 @@ def generate_daily_report(market, mode):
             })
             
         initial_balance = 10000000
-        
         total_return = round(((total_pnl / initial_balance) * 100), 2)
         
         msg_title = f"{icon} [오늘의 {market.upper()} {strategy_name} 성적표]"
