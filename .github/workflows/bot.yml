@@ -45,29 +45,31 @@ jobs:
       run: |
         echo "⏰ 울린 알람(Cron): $CRON_SCHEDULE"
 
+        # 💡 [핵심] 와일드카드(*)를 사용하여 띄어쓰기 오류를 원천 차단합니다!
+
         # 1. 한국장 DCA 알람이 울렸을 때
-        if [ "$CRON_SCHEDULE" == "15 6 * * 1-5" ]; then
+        if [[ "$CRON_SCHEDULE" == *"15 6"* ]]; then
           echo "💼 [한국장] DCA 스캔 시작"
           python main.py --market kr --mode dca
           
         # 2. 미국장 DCA 알람이 울렸을 때
-        elif [ "$CRON_SCHEDULE" == "45 19 * * 1-5" ]; then
+        elif [[ "$CRON_SCHEDULE" == *"45 19"* ]]; then
           echo "💼 [미국장] DCA 스캔 시작"
           python main.py --market us --mode dca
           
-        # 3. 한국장 장중 20분 간격 알람이 울렸을 때
-        elif [ "$CRON_SCHEDULE" == "0,20,40 0-6 * * 1-5" ]; then
+        # 3. 한국장 장중 20분 간격 알람이 울렸을 때 (0-6 포함 여부로 확인)
+        elif [[ "$CRON_SCHEDULE" == *"0-6"* ]]; then
           echo "🇰🇷 [한국장] 단타 & 불장 스캔 시작"
           python main.py --market kr --mode danta
           python main.py --market kr --mode bull
           
-        # 4. 미국장 장중 20분 간격 알람이 울렸을 때
-        elif [ "$CRON_SCHEDULE" == "0,20,40 13-19 * * 1-5" ]; then
+        # 4. 미국장 장중 20분 간격 알람이 울렸을 때 (13-19 포함 여부로 확인)
+        elif [[ "$CRON_SCHEDULE" == *"13-19"* ]]; then
           echo "🇺🇸 [미국장] 단타 & 불장 스캔 시작"
           python main.py --market us --mode danta
           python main.py --market us --mode bull
           
-        # 5. 수동 실행 (Run workflow 버튼 클릭 시 알람 값이 없음)
+        # 5. 수동 실행 (Run workflow 버튼 클릭 시)
         else
           echo "🛠️ 테스트: 한국장/미국장 단타 & 불장 수동 스캔!"
           python main.py --market kr --mode danta
