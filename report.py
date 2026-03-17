@@ -109,8 +109,19 @@ def generate_daily_report(market, mode):
                 "inline": False
             })
             time.sleep(0.5)
+
+        # 💡 [신규 추가] 디스코드 25개 제한 방어 로직!
+        if len(trades_summary) > 20:
+            overflow_count = len(trades_summary) - 20
+            trades_summary = trades_summary[:20]
+            trades_summary.append({
+                "name": f"➕ 그 외 {overflow_count}건의 거래 생략",
+                "value": "너무 많은 종목이 포착되어 리포트에 모두 담지 못했습니다. (구글 시트를 확인하세요!)",
+                "inline": False
+            })
             
         initial_balance = 10000000
+        
         total_return = round(((total_pnl / initial_balance) * 100), 2)
         
         msg_title = f"{icon} [오늘의 {market.upper()} {strategy_name} 성적표]"
